@@ -1,14 +1,14 @@
 board = [
     # Black pieces
     ["b_rook", "b_knight", "b_bishop", "b_queen", "b_king", "b_bishop", "b_knight", "b_rook"],
-    ["b_pawn", "b_pawn", "b_pawn", "b_pawn", "b_pawn", "b_pawn", "b_pawn", "b_pawn"],
+    ["b_pawn"] * 8,
     # Empty rows
-    ["", "", "", "", "", "", "", ""],
-    ["", "", "", "", "", "", "", ""],
-    ["", "", "", "", "", "", "", ""],
-    ["", "", "", "", "", "", "", ""],
+    [""] * 8,
+    [""] * 8,
+    [""] * 8,
+    [""] * 8,
     # White pieces
-    ["w_pawn", "w_pawn", "w_pawn", "w_pawn", "w_pawn", "w_pawn", "w_pawn", "w_pawn"],
+    ["w_pawn"] * 8,
     ["w_rook", "w_knight", "w_bishop", "w_queen", "w_king", "w_bishop", "w_knight", "w_rook"],
 ]
 
@@ -16,8 +16,12 @@ def print_board(board):
     print("    a   b   c   d   e   f   g   h")
     print("  " + "-" * 33)
     for i, row in enumerate(board, start=1):
-        print(f"{i} | " + " | ".join(piece if piece else " " for piece in row) + " |")
+        print(f"{i} | " + " | ".join(piece_symbols.get(piece, " ") for piece in row) + " |")
         print("  " + "-" * 33)
+piece_symbols = {
+    "b_pawn": "♟", "b_rook": "♜", "b_knight": "♞", "b_bishop": "♝", "b_queen": "♛", "b_king": "♚",
+    "w_pawn": "♙", "w_rook": "♖", "w_knight": "♘", "w_bishop": "♗", "w_queen": "♕", "w_king": "♔"
+}
 
 # Call the function to display the board
 print_board(board)
