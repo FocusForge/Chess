@@ -24,19 +24,34 @@ def algebraic_to_index(pos):
 
 # Validate pawn movement (forward only, one or two squares from starting position)
 def is_valid_pawn_move(piece, src_row, src_col, dst_row, dst_col, board):
-    direction = -1 if piece.startswith("w") else 1  # white moves up, black moves down
-    start_row = 6 if piece.startswith("w") else 1
+    color = piece[0]
+    direction = -1 if color == "w" else 1  # White moves up (-1), Black moves down (+1)
+    start_row = 6 if color == "w" else 1
+    
+    # --- 1. Diagonal Capture ---
+    # The move must be one square forward in the correct direction.
+    if dst_row == src_row + direction:
+        # The move must be one square to the left or right.
+        if dst_col == src_col - 1 or dst_col == src_col + 1:
+            target_piece = board[dst_row][dst_col]
+            # There must be an opponent's piece to capture.
+            if target_piece != "" and not target_piece.startswith(color):
+                return True
 
-    # Destination must be empty for now (no captures yet)
-    if board[dst_row][dst_col] != "":
-        return False
+    # --- 2. Forward Movement ---
+    # The destination square must be empty for any forward move.
+    if board[dst_row][dst_col] == "":
+        # Standard one-square move
+        if dst_col == src_col and dst_row == src_row + direction:
+            return True
+        # Initial two-square move
+        if (dst_col == src_col and src_row == start_row and
+                dst_row == src_row + 2 * direction):
+            # The path must be clear (the square in between must be empty).
+            if board[src_row + direction][src_col] == "":
+                return True
 
-    # Move forward one square
-    if dst_col == src_col and dst_row == src_row + direction:
-        return True
-    # Move forward two squares from starting position
-    if dst_col == src_col and src_row == start_row and dst_row == src_row + 2 * direction:
-        return True
+    # If none of the above conditions are met, the move is invalid.
     return False
 
 # Move a piece from source to destination, enforcing turn rules and pawn validation
