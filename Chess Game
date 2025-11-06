@@ -7,6 +7,14 @@ piece_symbols = {
     "b_pawn": "♟", "b_rook": "♜", "b_knight": "♞", "b_bishop": "♝", "b_queen": "♛", "b_king": "♚",
     "w_pawn": "♙", "w_rook": "♖", "w_knight": "♘", "w_bishop": "♗", "w_queen": "♕", "w_king": "♔"
 }
+# --- NEW GLOBAL VARIABLE FOR CASTLING STATE ---
+has_moved = {
+    "w_king": False, "b_king": False,
+    "w_rook_ks": False, "w_rook_qs": False, # Kingside (h-file) and Queenside (a-file) Rooks
+    "b_rook_ks": False, "b_rook_qs": False,
+}
+# ---------------------------------------------
+
 def algebraic_to_index(pos):
     # Added error check for invalid input length
     if len(pos) != 2 or not ('a' <= pos[0] <= 'h') or not ('1' <= pos[1] <= '8'):
@@ -16,7 +24,6 @@ def algebraic_to_index(pos):
     return row, col
 
 def is_path_clear(board, src_row, src_col, dst_row, dst_col):
-    # This function is correct.
     row_diff = dst_row - src_row
     col_diff = dst_col - src_col
     row_step = 0
@@ -54,10 +61,10 @@ def is_valid_queen_move(board, src_row, src_col, dst_row, dst_col):
 def is_valid_king_move(src_row, src_col, dst_row, dst_col):
     d_row = abs(dst_row - src_row)
     d_col = abs(dst_col - src_col)
-    return max(d_row, d_col) == 1
+    # Allows King to move 1 square OR 2 squares horizontally for castling detection later
+    return max(d_row, d_col) == 1 or (d_row == 0 and d_col == 2) 
 
 def is_valid_pawn_move(piece, src_row, src_col, dst_row, dst_col, board):
-    # This function is correct.
     color = piece[0]
     direction = -1 if color == "w" else 1
     start_row = 6 if color == "w" else 1
@@ -65,6 +72,7 @@ def is_valid_pawn_move(piece, src_row, src_col, dst_row, dst_col, board):
     # Diagonal Capture
     if dst_row == src_row + direction and (dst_col == src_col - 1 or dst_col == src_col + 1):
         target_piece = board[dst_row][dst_col]
+        # NOTE: Missing En Passant check here, but standard capture is correct
         return target_piece != "" and not target_piece.startswith(color)
         
     # Forward Movement (must be to an empty square)
@@ -76,13 +84,85 @@ def is_valid_pawn_move(piece, src_row, src_col, dst_row, dst_col, board):
 
 def is_move_valid_for_piece(piece, board, src_row, src_col, dst_row, dst_col):
     piece_type = piece.split('_')[1]
+    
+    # Check if destination is occupied by own color (Skip this check for King/Castling validation)
+    target_piece = board[dst_row][dst_col]
+    if target_piece.startswith(piece[0]):
+        return False
+        
     if piece_type == "pawn": return is_valid_pawn_move(piece, src_row, src_col, dst_row, dst_col, board)
     elif piece_type == "rook": return is_valid_rook_move(board, src_row, src_col, dst_row, dst_col)
     elif piece_type == "knight": return is_valid_knight_move(src_row, src_col, dst_row, dst_col)
     elif piece_type == "bishop": return is_valid_bishop_move(board, src_row, src_col, dst_row, dst_col)
     elif piece_type == "queen": return is_valid_queen_move(board, src_row, src_col, dst_row, dst_col)
-    elif piece_type == "king": return is_valid_king_move(src_row, src_col, dst_row, dst_col)
+    elif piece_type == "king": 
+        # For King moves, we only validate 1 square movement here, Castling is validated separately
+        d_row = abs(dst_row - src_row)
+        d_col = abs(dst_col - src_col)
+        return max(d_row, d_col) == 1
+
     return False
+
+# --- NEW CASTLING VALIDATION FUNCTION ---
+def is_square_attacked(board, row, col, attacker_color):
+    """Checks if a given square is attacked by the specified color."""
+    for r_opp in range(8):
+        for c_opp in range(8):
+            piece = board[r_opp][c_opp]
+            if piece.startswith(attacker_color):
+                # Temporarily check if the opponent's piece *can* move to the square, 
+                # ignoring whether that move would check *their* own king.
+                # Use the piece's base movement function, skipping the 'check-rule' loop in get_all_legal_moves.
+                
+                # Check 1: Is the target square occupied by an opponent piece? (is_move_valid_for_piece already checks this)
+                target_piece = board[row][col]
+                if target_piece.startswith(attacker_color):
+                    continue # Attacker piece is on its own color, can't move there (this is crude, but necessary simplification)
+                
+                # Create a temporary board to run the validation check cleanly
+                temp_board = [r[:] for r in board]
+                temp_board[row][col] = "" # Ensure the target square is treated as empty for path checks if a friendly piece is there
+                
+                if is_move_valid_for_piece(piece, temp_board, r_opp, c_opp, row, col):
+                    return True
+    return False
+
+def is_valid_castle(board, color, is_kingside):
+    king_row = 7 if color == "w" else 0
+    opponent_color = "b" if color == "w" else "w"
+    
+    # 1. Check if King and Rook have moved
+    king_key = f"{color}_king"
+    rook_key = f"{color}_rook_ks" if is_kingside else f"{color}_rook_qs"
+    
+    if has_moved[king_key] or has_moved[rook_key]:
+        return False
+    if board[king_row][4] != f"{color}_king":
+        return False # King must be on original square
+
+    # Define coordinates and squares to check
+    if is_kingside:
+        empty_cols = [5, 6]
+        attacked_cols = [4, 5, 6] # e-file (king's starting pos), f-file (pass through), g-file (land)
+        rook_col = 7
+    else: # Queenside
+        empty_cols = [1, 2, 3] # Note: b-file, c-file, d-file must be empty
+        attacked_cols = [4, 3, 2] # e-file (start), d-file (pass), c-file (land)
+        rook_col = 0
+        
+    # 2. Check if path is clear (squares between King and Rook are empty)
+    for col in empty_cols:
+        if board[king_row][col] != "":
+            return False
+
+    # 3. Check if King is in check, or passes through/lands on an attacked square
+    for col in attacked_cols:
+        if is_square_attacked(board, king_row, col, opponent_color):
+            return False
+
+    return True
+# ---------------------------------------------
+
 
 # --- CHECK/CHECKMATE LOGIC ---
 def find_king(board, color):
@@ -96,14 +176,10 @@ def is_in_check(board, color):
     if king_row is None: return False
     
     opponent_color = "b" if color == "w" else "w"
-    for r in range(8):
-        for c in range(8):
-            piece = board[r][c]
-            if piece.startswith(opponent_color):
-                # Check if this opponent piece can attack the king's square
-                if is_move_valid_for_piece(piece, board, r, c, king_row, king_col):
-                    return True
-    return False
+    
+    # Reusing the new is_square_attacked function for simpler check logic
+    return is_square_attacked(board, king_row, king_col, opponent_color)
+
 
 def simulate_move(board, src_r, src_c, dst_r, dst_c):
     new_board = [row[:] for row in board] # Deep copy
@@ -113,8 +189,19 @@ def simulate_move(board, src_r, src_c, dst_r, dst_c):
     return new_board
 
 def get_all_legal_moves(board, color):
-    """Generates all legal moves for a given color, including check evasion."""
+    """Generates all legal moves for a given color, including check evasion and castling."""
     legal_moves = []
+    king_row = 7 if color == "w" else 0
+    
+    # --- ADD CASTLING MOVES ---
+    # Kingside Castling: e1 g1 (or e8 g8)
+    if is_valid_castle(board, color, True):
+        legal_moves.append(((king_row, 4), (king_row, 6)))
+    # Queenside Castling: e1 c1 (or e8 c8)
+    if is_valid_castle(board, color, False):
+        legal_moves.append(((king_row, 4), (king_row, 2)))
+    # --------------------------
+    
     for r_start in range(8):
         for c_start in range(8):
             piece = board[r_start][c_start]
@@ -124,6 +211,11 @@ def get_all_legal_moves(board, color):
                         target_piece = board[r_end][c_end]
                         if target_piece.startswith(color): continue # Can't capture own
                         
+                        # Use the simplified King movement for general checks (max(d_row, d_col) == 1)
+                        if piece.endswith("king"):
+                            if abs(r_end - r_start) > 1 or abs(c_end - c_start) > 1:
+                                continue # Filter out 2-square King moves here (handled by castling above)
+
                         if is_move_valid_for_piece(piece, board, r_start, c_start, r_end, c_end):
                             # Test if the move leaves the king in check
                             temp_board = simulate_move(board, r_start, c_start, r_end, c_end)
@@ -131,7 +223,7 @@ def get_all_legal_moves(board, color):
                                 legal_moves.append(((r_start, c_start), (r_end, c_end)))
     return legal_moves
 
-# --- MAIN MOVE EXECUTION (Modified) ---
+# --- MAIN MOVE EXECUTION (UPDATED) ---
 def make_move(board, move, current_turn):
     try:
         src, dst = move.strip().split()
@@ -141,34 +233,65 @@ def make_move(board, move, current_turn):
         print(f"Error: Invalid move format or position. {e}")
         return False
         
+    piece_to_move = board[src_row][src_col]
+        
     # Check 1: Is the move even in the list of legal, non-checking moves?
     legal_moves = get_all_legal_moves(board, current_turn)
     move_indices = ((src_row, src_col), (dst_row, dst_col))
 
     if move_indices not in legal_moves:
         # Provide better error feedback
-        piece = board[src_row][src_col]
-        if piece == "":
+        if piece_to_move == "":
             print(f"Error: No piece at {src}.")
-        elif not piece.startswith(current_turn):
+        elif not piece_to_move.startswith(current_turn):
             print(f"Error: That's not your piece.")
         elif board[dst_row][dst_col].startswith(current_turn):
             print("Error: You can't capture your own piece.")
-        elif is_in_check(simulate_move(board, src_row, src_col, dst_row, dst_col), current_turn):
-             print("Illegal move: This move leaves your King in check!")
         else:
-             print("Error: Invalid move for that piece (check rules/path/movement).")
+            print("Error: Invalid move (check rules/path, or this move leaves your King in check!).")
         return False
         
-    # If the move is in the legal list, execute it
-    board[dst_row][dst_col] = board[src_row][src_col]
+    # --- CASTLING EXECUTION ---
+    if piece_to_move.endswith("king") and abs(dst_col - src_col) == 2:
+        # 1. Move the King
+        board[dst_row][dst_col] = piece_to_move
+        board[src_row][src_col] = ""
+
+        # 2. Move the Rook
+        if dst_col == 6: # Kingside (e->g, move h->f)
+            board[src_row][5] = board[src_row][7]
+            board[src_row][7] = ""
+            has_moved[f"{current_turn}_rook_ks"] = True
+        elif dst_col == 2: # Queenside (e->c, move a->d)
+            board[src_row][3] = board[src_row][0]
+            board[src_row][0] = ""
+            has_moved[f"{current_turn}_rook_qs"] = True
+        
+        # 3. Update the 'has_moved' status for the King
+        has_moved[f"{current_turn}_king"] = True
+        return True
+    # --- END CASTLING EXECUTION ---
+    
+    # Standard Move Execution
+    board[dst_row][dst_col] = piece_to_move
     board[src_row][src_col] = ""
     
-    piece_moved = board[dst_row][dst_col]
-    if piece_moved.endswith("pawn") and (dst_row == 0 or dst_row == 7):
+    # --- UPDATE 'HAS_MOVED' STATUS FOR KING/ROOK ---
+    color = current_turn
+    if piece_to_move.endswith("king"):
+        has_moved[f"{color}_king"] = True
+    elif piece_to_move.endswith("rook"):
+        if src_col == 7: # Kingside Rook
+            has_moved[f"{color}_rook_ks"] = True
+        elif src_col == 0: # Queenside Rook
+            has_moved[f"{color}_rook_qs"] = True
+    # ------------------------------------------------
+
+    # Pawn Promotion Check
+    if piece_to_move.endswith("pawn") and (dst_row == 0 or dst_row == 7):
         board[dst_row][dst_col] = f"{current_turn}_queen"
         print("Pawn promoted to Queen! ♕")
-        
+            
     return True
 
 def print_board(board):
@@ -196,7 +319,7 @@ while True:
         print("\n*** You are in CHECK! ***")
         
     print(f"\nIt's {current_turn.upper()}'s turn.")
-    move = input("Enter your move (e.g., e2 e4) or 'exit' to quit: ").strip()
+    move = input("Enter your move (e.g., e2 e4, or e1 g1 for Castling) or 'exit' to quit: ").strip()
     
     if move.lower() == "exit":
         print("Thanks for playing!")
